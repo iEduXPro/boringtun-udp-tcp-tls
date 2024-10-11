@@ -45,9 +45,11 @@ const N_SESSIONS: usize = 8;
 pub enum TunnResult<'a> {
     Done,
     Err(WireGuardError),
-    WriteToNetwork(&'a mut [u8]),
-    WriteToTunnelV4(&'a mut [u8], Ipv4Addr),
-    WriteToTunnelV6(&'a mut [u8], Ipv6Addr),
+    // 用于发送 WireGuard 协议消息或加密的数据
+    WriteToNetwork(&'a mut [u8]),                   //本地 -> 网络（外出）； WireGuard 协议层； 数据已加密
+    // 用于接收并处理来自 WireGuard 隧道的解密数据 ， 包含源 IP 地址信息，而 WriteToNetwork 不包含
+    WriteToTunnelV4(&'a mut [u8], Ipv4Addr),        //网络 -> 本地 TUN 设备（进入）； IP 协议层（特别是 IPv4）； 数据已解密
+    WriteToTunnelV6(&'a mut [u8], Ipv6Addr),        //网络 -> 本地 TUN 设备（进入）
 }
 
 impl<'a> From<WireGuardError> for TunnResult<'a> {
@@ -124,6 +126,7 @@ pub enum Packet<'a> {
 }
 
 impl Tunn {
+    //解析接收到的数据包
     #[inline(always)]
     pub fn parse_incoming_packet(src: &[u8]) -> Result<Packet, WireGuardError> {
         if src.len() < 4 {
@@ -247,6 +250,7 @@ impl Tunn {
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    /// 封装要发送的数据包
     pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
@@ -315,6 +319,7 @@ impl Tunn {
         .unwrap_or_else(TunnResult::from)
     }
 
+    //处理已验证的数据包
     fn handle_handshake_init<'a>(
         &mut self,
         p: HandshakeInit,
@@ -403,6 +408,7 @@ impl Tunn {
     }
 
     /// Decrypts a data packet, and stores the decapsulated packet in dst.
+    /// 处理数据包
     fn handle_data<'a>(
         &mut self,
         packet: PacketData,
@@ -448,7 +454,6 @@ impl Tunn {
         match self.handshake.format_handshake_initiation(dst) {
             Ok(packet) => {
                 tracing::debug!("Sending handshake_initiation");
-
                 if starting_new_handshake {
                     self.timer_tick(TimerName::TimeLastHandshakeStarted);
                 }
@@ -587,6 +592,9 @@ impl Tunn {
 
 #[cfg(test)]
 mod tests {
+    use std::{net::UdpSocket, str::Bytes};
+
+    use crate::device::{DeviceConfig, DeviceHandle};
     #[cfg(feature = "mock-instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
 
@@ -791,4 +799,84 @@ mod tests {
         };
         assert_eq!(sent_packet_buf, recv_packet_buf);
     }
+
+    #[test]
+    fn handle_handshake_with_server(){
+        use tokio::runtime::Runtime;
+        let rt = Runtime::new().unwrap();
+        // Run the WireGuard setup in the Tokio runtime
+        rt.block_on(async {
+
+            // Generate the private/public key for the client
+            let private_key = base64::decode("CKwuCgQ3g0CmxX2PD1FfJlokPRK+kJq0o3cxpCnTLFM=").unwrap();
+            let mut key_array: [u8; 32] = [0; 32];
+            key_array.copy_from_slice(&private_key);
+            let my_private_key = x25519::StaticSecret::from(key_array);
+            let peer_public_key = x25519_dalek::PublicKey::from(&my_private_key);
+
+            println!("Client Private/Public Key: {:?} / {:?}", private_key , base64::encode(peer_public_key));
+
+            // Generate the server public key
+            let server_public_key_str = base64::decode("Bfaq88y2KNrRq7I+pnLg3s8bk4NbbZAZtB1Jb0QAIEI=").unwrap();
+            key_array.copy_from_slice(&server_public_key_str);
+            let server_public_key = x25519_dalek::PublicKey::from(key_array);
+            
+            
+            let mut wg = WGHandle::init_with_config(
+                addr_v4,
+                addr_v6,
+                DeviceConfig {
+                    n_threads: 2,
+                    use_connected_socket: false,
+                    #[cfg(target_os = "linux")]
+                    use_multi_queue: true,
+                    #[cfg(target_os = "linux")]
+                    uapi_fd: -1,
+                },
+            );
+        });
+    }
 }
+
+/*
+Noise Protocol (noise/mod.rs)
+│
+├── Tunn 结构体
+│   ├── handshake
+│   ├── sessions
+│   ├── current
+│   ├── packet_queue
+│   └── timers
+│
+├── 数据包处理
+│   ├── parse_incoming_packet()
+│   ├── handle_verified_packet()
+│   ├── handle_handshake_init()
+│   ├── handle_handshake_response()
+│   ├── handle_cookie_reply()
+│   └── handle_data()
+│
+├── 数据包封装与发送
+│   ├── encapsulate()
+│   └── format_handshake_initiation()
+│
+├── 会话管理
+│   ├── set_current_session()
+│   ├── queue_packet()
+│   └── dequeue_packet()
+│
+├── 辅助功能
+│   ├── estimate_loss()
+│   └── stats()
+│
+├── 速率限制
+│   └── rate_limiter
+│
+├── 定时器功能
+│   └── update_timers()
+│
+└── 测试用例
+    ├── 创建tunnel
+    ├── 完成握手
+    └── 发送数据包
+*/

@@ -51,6 +51,11 @@ nix = { version = "0.25", default-features = false, features = [
     "user",
 ] }
 
+tokio = { version = "1", features = ["full"] }
+futures = "0.3.25"
+err-context = "0.1.0"
+log = "0.4.11"
+
 [dev-dependencies]
 etherparse = "0.13"
 tracing-subscriber = "0.3"

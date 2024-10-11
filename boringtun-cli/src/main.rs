@@ -97,12 +97,13 @@ fn main() {
     let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
 
     // Create a socketpair to communicate between forked processes
+    //创建一对用于进程间通信的 Unix 数据报套接字，并将其中一个套接字设置为非阻塞模式。
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
     let _ = sock1.set_nonblocking(true);
 
     let _guard;
 
-    if background {
+    if background {//后台运行模式
         let log = matches.value_of("log").unwrap();
 
         let log_file =
@@ -118,14 +119,14 @@ fn main() {
             .with_ansi(false)
             .init();
 
-        let daemonize = Daemonize::new()
-            .working_directory("/tmp")
-            .exit_action(move || {
+        let daemonize = Daemonize::new() //用于将当前进程变为守护进程。守护进程是一种在后台运行的进程，通常与前台交互很少。
+            .working_directory("/tmp") //设置守护进程的工作目录为 /tmp
+            .exit_action(move || {      //这是在守护进程父进程退出之前执行的操作。在这个闭包中，使用 sock2.recv() 接收 sock1 发送的数据
                 let mut b = [0u8; 1];
-                if sock2.recv(&mut b).is_ok() && b[0] == 1 {
+                if sock2.recv(&mut b).is_ok() && b[0] == 1 { //如果接收到的字节为 1，说明进程成功启动
                     println!("BoringTun started successfully");
                 } else {
-                    eprintln!("BoringTun failed to start");
+                    eprintln!("BoringTun failed to start"); 
                     exit(1);
                 };
             });
@@ -137,7 +138,7 @@ fn main() {
                 exit(1);
             }
         }
-    } else {
+    } else {                        //非后台模式
         tracing_subscriber::fmt()
             .pretty()
             .with_max_level(log_level)
@@ -148,22 +149,22 @@ fn main() {
         n_threads,
         #[cfg(target_os = "linux")]
         uapi_fd,
-        use_connected_socket: !matches.is_present("disable-connected-udp"),
+        use_connected_socket: !matches.is_present("disable-connected-udp"), //是否使用连接的 UDP 套接字
         #[cfg(target_os = "linux")]
-        use_multi_queue: !matches.is_present("disable-multi-queue"),
+        use_multi_queue: !matches.is_present("disable-multi-queue"), //多队列功能
     };
-
-    let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {
+    
+    let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) { //设备初始化
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed
             tracing::error!(message = "Failed to initialize tunnel", error=?e);
-            sock1.send(&[0]).unwrap();
+            sock1.send(&[0]).unwrap(); //通过 sock1.send(&[0]) 通知父进程失败，然后退出。
             exit(1);
         }
     };
 
-    if !matches.is_present("disable-drop-privileges") {
+    if !matches.is_present("disable-drop-privileges") { //权限降级
         if let Err(e) = drop_privileges() {
             tracing::error!(message = "Failed to drop privileges", error = ?e);
             sock1.send(&[0]).unwrap();
@@ -179,3 +180,10 @@ fn main() {
 
     device_handle.wait();
 }
+
+/*
+ 1. sock1 和 sock2 是一对通过 UnixDatagram::pair() 创建的 UNIX 数据报套接字。它们的作用是在父进程和守护进程（子进程）之间进行通信
+ 2. 当程序以后台模式运行时（即 background == true），会启动一个新的守护进程（子进程）。这时，sock1 在父进程中，sock2 在子进程中，它们用于父进程和子进程之间的通信。
+
+
+ */

@@ -8,6 +8,8 @@
 #[cfg(feature = "device")]
 pub mod device;
 
+pub mod udp_over_tcp;
+
 #[cfg(feature = "ffi-bindings")]
 pub mod ffi;
 #[cfg(feature = "jni-bindings")]
