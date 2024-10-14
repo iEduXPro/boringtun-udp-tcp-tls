@@ -1,7 +1,7 @@
 To hake boringTun.
 - [ ] TCP support for WireGuard
 - [ ] TLS support for WireGuard
-- [ ] 
+
 ![boringtun logo banner](./banner.png)
 
 # BoringTun
