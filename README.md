@@ -1,11 +1,10 @@
 To hake boringTun.
+
 - [ ] TCP support for WireGuard
 - [ ] TLS support for WireGuard
 
-![boringtun logo banner](./banner.png)
 
 # BoringTun
-
 ## Warning
 Boringtun is currently undergoing a restructuring. You should probably not rely on or link to 
 the master branch right now. Instead you should use the crates.io page.
